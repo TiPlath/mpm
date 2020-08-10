@@ -642,7 +642,7 @@ void mpm::Node<Tdim, Tdof, Tnphases>::apply_contact_law(double friction) {
   // If this node is multimaterial, i.e. material_ids_ has more than one id
   // stored Iterate over all materials in the material_ids set
   if (material_ids_.size() > 1) {
-    std::lock_guard<std::mutex> guard(node_mutex_);
+    node_mutex_.lock();
     for (auto mitr = material_ids_.begin(); mitr != material_ids_.end();
          ++mitr) {
       // Compute the normal component of the separation vector
@@ -680,5 +680,6 @@ void mpm::Node<Tdim, Tdof, Tnphases>::apply_contact_law(double friction) {
                                           VectorDim::Zero(), Tdim);
       }
     }
+    node_mutex_.unlock();
   }
 }
