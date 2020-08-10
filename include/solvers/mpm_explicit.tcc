@@ -277,6 +277,11 @@ bool mpm::MPMExplicit<Tdim>::solve() {
                     std::placeholders::_1, phase, this->dt_),
           std::bind(&mpm::NodeBase<Tdim>::status, std::placeholders::_1));
 
+    // Iterate over each particle to compute updated position
+    mesh_->iterate_over_particles(
+        std::bind(&mpm::ParticleBase<Tdim>::compute_updated_position,
+                  std::placeholders::_1, this->dt_, this->velocity_update_));
+
     if (interface_) {
       // Map multimaterial properties from particles to nodes
       mesh_->iterate_over_particles(std::bind(
@@ -307,12 +312,18 @@ bool mpm::MPMExplicit<Tdim>::solve() {
       mesh_->iterate_over_nodes(std::bind(
           &mpm::NodeBase<Tdim>::compute_multimaterial_normal_unit_vector,
           std::placeholders::_1));
-    }
+      
+      // Apply contact law
+      mesh_->iterate_over_nodes(
+          std::bind(&mpm::NodeBase<Tdim>::apply_contact_law,
+                    std::placeholders::_1, 0.15));
 
-    // Iterate over each particle to compute updated position
-    mesh_->iterate_over_particles(
-        std::bind(&mpm::ParticleBase<Tdim>::compute_updated_position,
-                  std::placeholders::_1, this->dt_, this->velocity_update_));
+      // Iterate over each particle to computed a delta in the updated position
+      // taking the contact law into account
+      mesh_->iterate_over_particles(
+          std::bind(&mpm::ParticleBase<Tdim>::compute_contact_updated_position,
+                    std::placeholders::_1, this->dt_));
+    }
 
     // Apply particle velocity constraints
     mesh_->apply_particle_velocity_constraints();
