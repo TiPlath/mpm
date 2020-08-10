@@ -93,21 +93,31 @@ mpm::MPMBase<Tdim>::MPMBase(const std::shared_ptr<IO>& io) : mpm::MPM(io) {
   }
 
   // VTK state variables
-  try {
-    if (post_process_.at("vtk_statevars").is_array() &&
-        post_process_.at("vtk_statevars").size() > 0) {
-      for (unsigned i = 0; i < post_process_.at("vtk_statevars").size(); ++i) {
-        std::string attribute =
-            post_process_["vtk_statevars"][i].template get<std::string>();
-        vtk_statevars_.emplace_back(attribute);
-      }
-    } else {
-      throw std::runtime_error(
-          "No VTK statevariable were specified, none will be generated");
+  if (post_process_.at("vtk_statevars").is_array() &&
+      post_process_.at("vtk_statevars").size() > 0) {
+    // Iterate over state_vars
+    for (const auto& svars : post_process_["vtk_statevars"]) {
+      // Phase id
+      unsigned phase_id = 0;
+      if (svars.contains("phase_id"))
+        phase_id = svars.at("phase_id").template get<unsigned>();
+
+      // State variables
+      if (svars.at("statevars").is_array() &&
+          svars.at("statevars").size() > 0) {
+        // Insert vtk_statevars_
+        const std::vector<std::string> state_var = svars["statevars"];
+        vtk_statevars_.insert(std::make_pair(phase_id, state_var));
+      } else
+        console_->warn(
+            "{} #{}: No VTK statevariable were specified, none will be "
+            "generated",
+            __FILE__, __LINE__);
     }
-  } catch (std::exception& exception) {
-    console_->warn("{} {}: {}", __FILE__, __LINE__, exception.what());
-  }
+  } else
+    console_->warn(
+        "{} #{}: No VTK statevariable were specified, none will be generated",
+        __FILE__, __LINE__);
 }
 
 // Initialise mesh
@@ -329,6 +339,29 @@ bool mpm::MPMBase<Tdim>::initialise_particles() {
                        particles_volume_end - particles_volume_begin)
                        .count());
 
+    // Material id update using particle sets
+    try {
+      auto material_sets = io_->json_object("material_sets");
+      if (!material_sets.empty()) {
+        for (const auto& material_set : material_sets) {
+          unsigned material_id =
+              material_set["material_id"].template get<unsigned>();
+          unsigned phase_id = mpm::ParticlePhase::Solid;
+          if (material_set.contains("phase_id"))
+            phase_id = material_set["phase_id"].template get<unsigned>();
+          unsigned pset_id = material_set["pset_id"].template get<unsigned>();
+          // Update material_id for particles in each pset
+          mesh_->iterate_over_particle_set(
+              pset_id, std::bind(&mpm::ParticleBase<Tdim>::assign_material,
+                                 std::placeholders::_1,
+                                 materials_.at(material_id), phase_id));
+        }
+      }
+    } catch (std::exception& exception) {
+      console_->warn("{} #{}: Material sets are not specified", __FILE__,
+                     __LINE__, exception.what());
+    }
+
   } catch (std::exception& exception) {
     console_->error("#{}: MPM Base generating particles: {}", __LINE__,
                     exception.what());
@@ -531,23 +564,30 @@ void mpm::MPMBase<Tdim>::write_vtk(mpm::Index step, mpm::Index max_steps) {
   }
 
   // VTK state variables
-  for (const auto& attribute : vtk_statevars_) {
-    // Write state variables
-    auto file =
-        io_->output_file(attribute, extension, uuid_, step, max_steps).string();
-    vtk_writer->write_scalar_point_data(
-        file, mesh_->particles_statevars_data(attribute), attribute);
-    // Write a parallel MPI VTK container file
+  for (auto const& vtk_statevar : vtk_statevars_) {
+    unsigned phase_id = vtk_statevar.first;
+    for (const auto& attribute : vtk_statevar.second) {
+      std::string phase_attribute =
+          "phase" + std::to_string(phase_id) + attribute;
+      // Write state variables
+      auto file =
+          io_->output_file(phase_attribute, extension, uuid_, step, max_steps)
+              .string();
+      vtk_writer->write_scalar_point_data(
+          file, mesh_->particles_statevars_data(attribute, phase_id),
+          phase_attribute);
+      // Write a parallel MPI VTK container file
 #ifdef USE_MPI
-    if (mpi_rank == 0 && mpi_size > 1) {
-      auto parallel_file = io_->output_file(attribute, ".pvtp", uuid_, step,
-                                            max_steps, write_mpi_rank)
-                               .string();
-      unsigned ncomponents = 1;
-      vtk_writer->write_parallel_vtk(parallel_file, attribute, mpi_size, step,
-                                     max_steps, ncomponents);
-    }
+      if (mpi_rank == 0 && mpi_size > 1) {
+        auto parallel_file = io_->output_file(phase_attribute, ".pvtp", uuid_,
+                                              step, max_steps, write_mpi_rank)
+                                 .string();
+        unsigned ncomponents = 1;
+        vtk_writer->write_parallel_vtk(parallel_file, phase_attribute, mpi_size,
+                                       step, max_steps, ncomponents);
+      }
 #endif
+    }
   }
 }
 #endif
@@ -1136,4 +1176,34 @@ void mpm::MPMBase<Tdim>::mpi_domain_decompose(bool initial_step) {
                        .count());
   }
 #endif  // MPI
+}
+
+//! MPM pressure smoothing
+template <unsigned Tdim>
+void mpm::MPMBase<Tdim>::pressure_smoothing(unsigned phase) {
+  // Assign pressure to nodes
+  mesh_->iterate_over_particles(
+      std::bind(&mpm::ParticleBase<Tdim>::map_pressure_to_nodes,
+                std::placeholders::_1, phase));
+
+#ifdef USE_MPI
+  int mpi_size = 1;
+
+  // Get number of MPI ranks
+  MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+
+  // Run if there is more than a single MPI task
+  if (mpi_size > 1) {
+    // MPI all reduce nodal pressure
+    mesh_->template nodal_halo_exchange<double, 1>(
+        std::bind(&mpm::NodeBase<Tdim>::pressure, std::placeholders::_1, phase),
+        std::bind(&mpm::NodeBase<Tdim>::assign_pressure, std::placeholders::_1,
+                  phase, std::placeholders::_2));
+  }
+#endif
+
+  // Smooth pressure over particles
+  mesh_->iterate_over_particles(
+      std::bind(&mpm::ParticleBase<Tdim>::compute_pressure_smoothing,
+                std::placeholders::_1, phase));
 }

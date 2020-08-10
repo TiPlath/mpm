@@ -14,7 +14,7 @@ bool write_json_unitcell(unsigned dim, const std::string& analysis,
   auto cell_type = "ED2Q4";
   auto io_type = "Ascii2D";
   std::string material = "LinearElastic2D";
-  unsigned material_id = 1;
+  std::vector<unsigned> material_id{{1}};
   std::vector<double> gravity{{0., -9.81}};
   std::vector<double> xvalues{{0.0, 0.5, 1.0}};
   std::vector<double> fxvalues{{0.0, 1.0, 1.0}};
@@ -96,7 +96,7 @@ bool write_json_unitcell(unsigned dim, const std::string& analysis,
         {"newmark", {{"newmark", true}, {"gamma", 0.5}, {"beta", 0.25}}}}},
       {"post_processing",
        {{"path", "results/"},
-        {"vtk_statevars", {{"pdstrain"}}},
+        {"vtk_statevars", {{{"phase_id", 0}, {"statevars", "pdstrain"}}}},
         {"output_steps", 10}}}};
 
   // Dump JSON as an input file to be read

@@ -84,6 +84,10 @@ class MPMBase : public MPM {
   //! \param[in] initial_step Start of simulation or later steps
   void mpi_domain_decompose(bool initial_step = false) override;
 
+  //! Pressure smoothing
+  //! \param[in] phase Phase to smooth pressure
+  void pressure_smoothing(unsigned phase);
+
  private:
   //! Return if a mesh will be isoparametric or not
   //! \retval isoparametric Status of mesh type
@@ -189,7 +193,7 @@ class MPMBase : public MPM {
   //! Mathematical functions
   std::map<unsigned, std::shared_ptr<mpm::FunctionBase>> math_functions_;
   //! VTK state variables
-  std::vector<std::string> vtk_statevars_;
+  tsl::robin_map<unsigned, std::vector<std::string>> vtk_statevars_;
   //! Set node concentrated force
   bool set_node_concentrated_force_{false};
   //! Damping type
