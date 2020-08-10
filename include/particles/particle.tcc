@@ -779,6 +779,32 @@ void mpm::Particle<Tdim>::compute_updated_position(
   this->displacement_ += nodal_velocity * dt;
 }
 
+// Compute delta updated position of the particle based in contact law
+template <unsigned Tdim>
+void mpm::Particle<Tdim>::compute_contact_updated_position(double dt) noexcept {
+  // Check if particle has a valid cell ptr
+  assert(cell_ != nullptr);
+  // Get interpolated change in nodal velocity by looping over all nodes and
+  // computing the delta velocity for this particle (and material) only
+  VectorDim delta_nodal_velocity = VectorDim::Zero();
+
+  for (unsigned i = 0; i < nodes_.size(); ++i) {
+    VectorDim delta_momentum = nodes_[i]->multimaterial_property(
+        "change_in_momenta", material_id_, Tdim);
+    double mass =
+        nodes_[i]->multimaterial_property("masses", material_id_)(0, 0);
+    VectorDim delta_velocity = (1 / mass) * delta_momentum;
+    delta_nodal_velocity += shapefn_[i] * delta_velocity;
+  }
+
+  // Update particle velocity using interpolated delta nodal velocity
+  this->velocity_ += delta_nodal_velocity;
+  // New position  current position + delta_nodal_velocity * dt
+  this->coordinates_ += delta_nodal_velocity * dt;
+  // Update displacement (displacement is initialized from zero)
+  this->displacement_ += delta_nodal_velocity * dt;
+}
+
 //! Map particle pressure to nodes
 template <unsigned Tdim>
 bool mpm::Particle<Tdim>::map_pressure_to_nodes() noexcept {
