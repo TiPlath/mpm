@@ -812,9 +812,9 @@ void mpm::Particle<Tdim>::compute_contact_updated_position(double dt) noexcept {
 
   for (unsigned i = 0; i < nodes_.size(); ++i) {
     VectorDim delta_momentum = nodes_[i]->multimaterial_property(
-        "change_in_momenta", material_id_, Tdim);
+        "change_in_momenta", this->material_id_[0], Tdim);
     double mass =
-        nodes_[i]->multimaterial_property("masses", material_id_)(0, 0);
+        nodes_[i]->multimaterial_property("masses", material_id_[0])(0, 0);
     VectorDim delta_velocity = (1 / mass) * delta_momentum;
     delta_nodal_velocity += shapefn_[i] * delta_velocity;
   }
