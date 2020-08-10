@@ -551,6 +551,10 @@ void mpm::Node<Tdim, Tdof,
         property_handle_->property("masses", prop_id_, *mitr);
     const Eigen::Matrix<double, Tdim, 1> momentum =
         property_handle_->property("momenta", prop_id_, *mitr, Tdim);
+
+    // Calculate the change in momentum as the velocity of the center of mass
+    // times the mass at the node for the given material and subtract it by the
+    // momentum at the node only for the given material
     const Eigen::Matrix<double, Tdim, 1> change_in_momenta =
         velocity_ * mass - momentum;
     property_handle_->update_property("change_in_momenta", prop_id_, *mitr,
@@ -615,5 +619,52 @@ void mpm::Node<Tdim, Tdof,
     // assign nodal-multimaterial normal unit vector to property pool
     property_handle_->assign_property("normal_unit_vectors", prop_id_, *mitr,
                                       normal_unit_vector, Tdim);
+  }
+}
+
+//! Apply contact law if node is multimaterial
+template <unsigned Tdim, unsigned Tdof, unsigned Tnphases>
+void mpm::Node<Tdim, Tdof, Tnphases>::apply_contact_law(double friction) {
+  // If this node is multimaterial, i.e. material_ids_ has more than one id
+  // stored Iterate over all materials in the material_ids set
+  if (material_ids_.size() > 1) {
+    std::lock_guard<std::mutex> guard(node_mutex_);
+    for (auto mitr = material_ids_.begin(); mitr != material_ids_.end();
+         ++mitr) {
+      // Compute the normal component of the separation vector
+      VectorDim separation_vector = property_handle_->property(
+          "separation_vectors", prop_id_, *mitr, Tdim);
+      VectorDim normal_unit_vector = property_handle_->property(
+          "normal_unit_vectors", prop_id_, *mitr, Tdim);
+      double normal_separation = separation_vector.dot(normal_unit_vector);
+
+      // Compute the tangential unit vector
+      VectorDim tangential_unit_vector =
+          (separation_vector - normal_separation * normal_unit_vector)
+              .normalized();
+
+      // Check if materials are in contact or separated
+      VectorDim change_in_momentum = property_handle_->property(
+          "change_in_momenta", prop_id_, *mitr, Tdim);
+      // Check if the materials are in contact
+      if (change_in_momentum.dot(normal_unit_vector) < 0 &&
+          normal_separation < 0) {
+        // Check if friction should be applied. Otherwise, materials are stuck
+        // to each other and the change in momentum remains unchanged
+        if (change_in_momentum.dot(tangential_unit_vector) >
+            -friction * change_in_momentum.dot(normal_unit_vector)) {
+          VectorDim new_change_in_momentum =
+              change_in_momentum.dot(normal_unit_vector) *
+              (normal_unit_vector - friction * tangential_unit_vector);
+          property_handle_->assign_property("change_in_momenta", prop_id_,
+                                            *mitr, new_change_in_momentum,
+                                            Tdim);
+        }
+      } else {
+        // Zero the change in momenta if the materials are separated
+        property_handle_->assign_property("change_in_momenta", prop_id_, *mitr,
+                                          VectorDim::Zero(), Tdim);
+      }
+    }
   }
 }

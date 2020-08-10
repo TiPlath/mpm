@@ -263,6 +263,16 @@ class Node : public NodeBase<Tdim> {
   //! Compute multimaterial normal unit vector
   void compute_multimaterial_normal_unit_vector() override;
 
+  //! Apply contact law if node is multimaterial
+  void apply_contact_law(double friction) override;
+
+  //! Return a multimaterial property for a given material at this node
+  Eigen::MatrixXd multimaterial_property(const std::string& property,
+                                         unsigned mat_id,
+                                         unsigned nprops = 1) override {
+    return property_handle_->property(property, prop_id_, mat_id, nprops);
+  }
+
  private:
   //! Mutex
   std::mutex node_mutex_;

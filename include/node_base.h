@@ -253,6 +253,14 @@ class NodeBase {
   //! Compute multimaterial normal unit vector
   virtual void compute_multimaterial_normal_unit_vector() = 0;
 
+  //! Apply contact law if node is multimaterial
+  virtual void apply_contact_law(double friction) = 0;
+
+  //! Return a multimaterial property for a given material at this node
+  virtual Eigen::MatrixXd multimaterial_property(const std::string& property,
+                                                 unsigned mat_id,
+                                                 unsigned nprops = 1) = 0;
+
 };  // NodeBase class
 }  // namespace mpm
 
